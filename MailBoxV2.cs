@@ -1,7 +1,7 @@
 ﻿using BestHTTP;
 using System;
+using System.Linq;
 using System.Text;
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -26,19 +26,24 @@ namespace Kfc
         public GameObject mask;
 
         //網址
-        //const string HOST = "http://entrance10.mobiusdice.com.tw/demoApi";
+#if __Localhost__
         const string HOST = "http://localhost:52673";
+#else
+        const string HOST = "http://entrance10.mobiusdice.com.tw/demoApi2";
+#endif
         string uri_GetMails = HOST + "/GetMailsV2";
-        string uri_GetReward = HOST + "/GetRewardV2"; 
+        string uri_GetReward = HOST + "/GetRewardV2";
+        string uri_GetPartRewards = HOST + "/GetPartRewards";
         string uri_SetMailLockOrNot = HOST + "/SetMailLockOrNotV2";
+        
 
         //必要資訊
-        string mAccount = "GM0000000006";
-        string mGuid = "a06b9b4c-8ebf-4dc5-a694-4cec773c7236";
+        string mAccount;
+        string mGuid;
 
         //外部執行事件
-        public Action<string> mMwssageBoxEvent;
-        public Action<int, int, int,string> mGetRewardEvent;
+        public Action<string> mMessageBoxEvent;
+        public Action<int,string> mGetRewardEvent;
 
         //目前點下去領取的信件
         GameObject currentMail;
@@ -46,14 +51,15 @@ namespace Kfc
         /// <summary>
         /// 開啟信箱
         /// </summary>
-        public void OpenMailBox(string _account,string _guid,Action<string> _messageBoxEvent, Action<int, int, int, string> _getRewardEvent)
+        public void OpenMailBox(string _account,string _guid,Action<string> _messageBoxEvent, Action<int, string> _getRewardEvent)
         {
             mAccount = _account;
             mGuid = _guid;
-            mMwssageBoxEvent = _messageBoxEvent;
+            mMessageBoxEvent = _messageBoxEvent;
             mGetRewardEvent = _getRewardEvent;
             gameObject.SetActive(true);
-
+            gobj_SystemMail.SetActive(true);
+            GetAllMails();
         }
 
         /// <summary>
@@ -63,14 +69,11 @@ namespace Kfc
         {
             mAccount = string.Empty;
             mGuid = string.Empty;
-            mMwssageBoxEvent = null;
-
+            mMessageBoxEvent = null;
+            
             gameObject.SetActive(false);
         }
-        private void OnEnable()
-        {
-            GetAllMails();
-        }
+  
 
         /// <summary>
         /// 取得所有郵件資訊 - 發送要求
@@ -100,7 +103,7 @@ namespace Kfc
             if (response == null || response.StatusCode != 200)
             {
                 Debug.LogError("與伺服器端連接失敗" + response.StatusCode);
-                if (mMwssageBoxEvent != null) mMwssageBoxEvent("與伺服器端連接失敗");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("與伺服器端連接失敗");
                 return;
             }
 
@@ -113,7 +116,7 @@ namespace Kfc
             foreach (Dictionary<string, object> mailDic in allMails)
             {
                 GameObject mail;
-                if (mailDic["Sender"] == null || string.IsNullOrEmpty(mailDic["Sender"].ToString()))
+                if (mailDic["Sender"] == null || mailDic["Sender"].ToString().Equals("系統") || string.IsNullOrEmpty(mailDic["Sender"].ToString()))
                 {
                     mailDic["Sender"] = "系統";
                     mail = Instantiate(prefab_SystemMail, trans_SystemContent);
@@ -131,6 +134,8 @@ namespace Kfc
                 bean.mailNumber = mailDic["MailNumber"].ToString();
 
                 bean.sender = mailDic["Sender"].ToString();
+                bean.senderFbId = (mailDic["SenderFbId"] == null)? string.Empty : mailDic["SenderFbId"].ToString();
+                bean.senderNickName = mailDic["SenderNickName"].ToString();
                 if (mailDic["SenderIcon"] == null || string.IsNullOrEmpty(mailDic["SenderIcon"].ToString()))
                 {
                     bean.senderIcon = -1;
@@ -155,7 +160,7 @@ namespace Kfc
                 //========= 4.填到UI中
                 if (isSystemMail)
                 {
-                    mail.transform.Find("UIScroll_Name/Viewport/Content/UITxt_Name").GetComponent<Text>().text = bean.sender;
+                    mail.transform.Find("UIScroll_Name/Viewport/Content/UITxt_Name").GetComponent<Text>().text = bean.senderNickName;
                     mail.transform.Find("UITxt_Date").GetComponent<Text>().text = bean.sendingTime.ToString("yyyy.MM.dd");
                     mail.transform.Find("UITxt_Title").GetComponent<Text>().text = bean.title;
                     mail.transform.Find("UIScroll_Content/Viewport/Content/UITxt_Content").GetComponent<Text>().text = bean.content;
@@ -168,9 +173,21 @@ namespace Kfc
                 }
                 else
                 {
-                    mail.transform.Find("UIScroll_Name/Viewport/Content/UITxt_Name").GetComponent<Text>().text = bean.sender;
+                    mail.transform.Find("UIScroll_Name/Viewport/Content/UITxt_Name").GetComponent<Text>().text = bean.senderNickName;
                     mail.transform.Find("UITxt_Date").GetComponent<Text>().text = bean.sendingTime.ToString("yyyy.MM.dd");
-                    mail.transform.Find("UITxt_Money").GetComponent<Text>().text = bean.reward;
+
+                    JObject jobj = null;
+                    int money;
+                    if (int.TryParse(bean.reward, out money))
+                    {
+                        mail.transform.Find("UITxt_Money").GetComponent<Text>().text = money.ToString();
+                    }
+                    else
+                    {
+                        jobj = JsonConvert.DeserializeObject<JObject>(bean.reward);
+                        mail.transform.Find("UITxt_Money").GetComponent<Text>().text = jobj.GetValue("money").ToString();
+                    }
+
                     mail.transform.Find("UIBtn_Lock").gameObject.SetActive(!bean.isLock);
                     mail.transform.Find("UIBtn_Unlock").gameObject.SetActive(bean.isLock);
                     if (bean.type == 0)
@@ -189,6 +206,14 @@ namespace Kfc
         public void GetMailRewardOrDelete(GameObject _mail)
         {
             currentMail = _mail;
+
+            MailBean bean = currentMail.GetComponent<MailBean>();
+            //先檢查有沒有上鎖，如果有上鎖且type為0，則不允許刪除
+            if (bean.type == 0 && bean.isLock == true)
+            {
+                if (mMessageBoxEvent != null) mMessageBoxEvent("郵件已上鎖");
+                return;
+            }
 
             Uri path = new Uri(uri_GetReward);
             HTTPRequest request = new HTTPRequest(path, HTTPMethods.Post, OnGetMailRewardFinished);
@@ -214,7 +239,7 @@ namespace Kfc
             if (response == null || response.StatusCode != 200)
             {
                 Debug.LogError("與伺服器端連接失敗" + response.StatusCode);
-                if (mMwssageBoxEvent != null) mMwssageBoxEvent("與伺服器端連接失敗");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("與伺服器端連接失敗");
                 return;
             }
 
@@ -223,7 +248,7 @@ namespace Kfc
             if (!jsonResponse.GetValue("result").ToString().Contains("000"))
             {
                 Debug.LogError("異常錯誤，請聯絡客服單位");
-                if (mMwssageBoxEvent != null) mMwssageBoxEvent("異常錯誤，請聯絡客服單位");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("異常錯誤，請聯絡客服單位");
                 return;
             }
 
@@ -238,9 +263,9 @@ namespace Kfc
                 case 2:
                     bean.type = 0;
                     currentMail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
-                    if(mGetRewardEvent != null) mGetRewardEvent(bean.type, (int)jsonResponse.GetValue("playerMoney"), (int)jsonResponse.GetValue("playerExp"), bean.reward);
+                    if(mGetRewardEvent != null) mGetRewardEvent((int)jsonResponse.GetValue("playerMoney"), null);
                     break;
-
+                    
             }
             
         }
@@ -277,7 +302,7 @@ namespace Kfc
             if (response == null || response.StatusCode != 200)
             {
                 Debug.LogError("與伺服器端連接失敗" + response.StatusCode);
-                if (mMwssageBoxEvent != null) mMwssageBoxEvent("與伺服器端連接失敗");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("與伺服器端連接失敗");
                 return;
             }
 
@@ -286,17 +311,125 @@ namespace Kfc
             if (!jsonResponse.GetValue("result").ToString().Contains("000"))
             {
                 Debug.LogError("異常錯誤，請聯絡客服單位");
-                if (mMwssageBoxEvent != null) mMwssageBoxEvent("異常錯誤，請聯絡客服單位");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("異常錯誤，請聯絡客服單位");
                 return;
             }
 
             MailBean bean = currentMail.GetComponent<MailBean>();
             bean.isLock = (bool)jsonResponse.GetValue("isLock");
-            
+
             currentMail.transform.Find("UIBtn_Unlock").gameObject.SetActive(bean.isLock);
             currentMail.transform.Find("UIBtn_Lock").gameObject.SetActive(!bean.isLock);
             
         }
+
+        public void GetPartMailsRewadAndDelete()
+        {
+            List<string> mailNumbers = null;
+            if (gobj_SystemMail.activeSelf)
+            {
+                if (gobj_SystemMail.transform.childCount == 0)
+                {
+                    if (mMessageBoxEvent != null) mMessageBoxEvent("無信件可領取");
+                    return;
+                }
+
+                mailNumbers = gobj_SystemMail.transform.GetComponentsInChildren<MailBean>().Select(tempMail => tempMail.mailNumber).ToList();
+            }
+            else if(gobj_PrivateMail.activeSelf)
+            {
+                if (gobj_PrivateMail.transform.childCount == 0)
+                {
+                    if (mMessageBoxEvent != null) mMessageBoxEvent("無信件可領取");
+                    return;
+                }
+
+                mailNumbers = gobj_PrivateMail.transform.GetComponentsInChildren<MailBean>().Select(tempMail => tempMail.mailNumber).ToList();
+            }
+
+            Uri path = new Uri(uri_GetPartRewards);
+            HTTPRequest request = new HTTPRequest(path, HTTPMethods.Post, OnGetPartMailsRewadAndDeleteFinished);
+
+            Dictionary<string, object> req = new Dictionary<string, object>();
+            req.Add("AccountName", mAccount);
+            req.Add("guid", mGuid);
+            req.Add("mailNumbers", mailNumbers);
+            
+            request.AddHeader("Content-Type", "application/json");
+            request.RawData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(req));
+            request.Send();
+            mask.SetActive(true);
+        }
+
+        private void OnGetPartMailsRewadAndDeleteFinished(HTTPRequest originalRequest, HTTPResponse response)
+        {
+            mask.SetActive(false);
+
+            if (response == null || response.StatusCode != 200)
+            {
+                Debug.LogError("與伺服器端連接失敗" + response.StatusCode);
+                if (mMessageBoxEvent != null) mMessageBoxEvent("與伺服器端連接失敗");
+                return;
+            }
+
+            Debug.Log(response.DataAsText);
+            JObject jsonResponse = JsonConvert.DeserializeObject<JObject>(response.DataAsText);
+            if (!jsonResponse.GetValue("result").ToString().Contains("000"))
+            {
+                if (jsonResponse.GetValue("result").ToString().Contains("001"))
+                {
+                    Debug.LogError("無可領取信件");
+                    if (mMessageBoxEvent != null) mMessageBoxEvent("無可領取信件");
+                    return;
+                }
+
+                Debug.LogError("異常錯誤，請聯絡客服單位");
+                if (mMessageBoxEvent != null) mMessageBoxEvent("異常錯誤，請聯絡客服單位");
+                return;
+            }
+
+            if (mGetRewardEvent != null) mGetRewardEvent((int)jsonResponse.GetValue("playerMoney"), null);
+            List<MailBean> beans = null;
+            if (gobj_SystemMail.activeSelf)
+            {
+                if (gobj_SystemMail.transform.childCount == 0)
+                {
+                    return;
+                }
+
+                beans = gobj_SystemMail.transform.GetComponentsInChildren<MailBean>().Select(tempMail => tempMail).ToList();
+            }
+            else if (gobj_PrivateMail.activeSelf)
+            {
+                if (gobj_PrivateMail.transform.childCount == 0)
+                {
+                    return;
+                }
+
+                beans = gobj_PrivateMail.transform.GetComponentsInChildren<MailBean>().Select(tempMail => tempMail).ToList();
+            }
+
+            
+            foreach (MailBean bean in beans)
+            {
+                if (bean.type == 0)
+                {
+                    if (bean.isLock == false)
+                    {
+                        Destroy(bean.gameObject);
+                    }
+                }
+                else
+                {
+                    bean.type = 0;
+                    bean.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
+
+                }
+            }
+
+        }
+
+
         /// <summary>
         /// 開啟系統信件
         /// </summary>
@@ -304,6 +437,8 @@ namespace Kfc
         {        
             gobj_SystemMail.SetActive(true);
             gobj_PrivateMail.SetActive(false);
+            gobj_SystemMail.transform.Find("Image").gameObject.SetActive(true);
+            gobj_PrivateMail.transform.Find("Image").gameObject.SetActive(false);
         }
         /// <summary>
         /// 開啟私人信件
@@ -312,6 +447,9 @@ namespace Kfc
         {
             gobj_SystemMail.SetActive(false);
             gobj_PrivateMail.SetActive(true);
+            gobj_SystemMail.transform.Find("Image").gameObject.SetActive(false);
+            gobj_PrivateMail.transform.Find("Image").gameObject.SetActive(true);
+
         }
     }
 

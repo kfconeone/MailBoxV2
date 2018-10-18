@@ -6,6 +6,8 @@ public class MailBean : MonoBehaviour
 
     public string mailNumber;
     public string sender;
+    public string senderFbId;
+    public string senderNickName;
     public int senderIcon;
     public DateTime sendingTime;
     public DateTime deleteTime;
