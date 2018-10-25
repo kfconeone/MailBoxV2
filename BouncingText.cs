@@ -20,6 +20,7 @@ public class BouncingText : MonoBehaviour {
 
         if (GetComponent<Text>().preferredWidth > boundObject.rect.width)
         {
+            
             Bouncing();
         }
         
@@ -32,6 +33,7 @@ public class BouncingText : MonoBehaviour {
         tweener.to = new Vector3(bouncingPosX - paddingEnd, tweener.to.y, 0f);
         tweener.duration = (int)Mathf.Abs(bouncingPosX) / 30;
         tweener.enabled = true;
+
     }
 
     public void OnTweenFinished()

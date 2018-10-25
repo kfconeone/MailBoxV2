@@ -7,6 +7,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
+using System.Globalization;
 
 namespace Kfc
 {
@@ -26,11 +27,8 @@ namespace Kfc
         public GameObject mask;
 
         //網址
-#if __Localhost__
-        const string HOST = "http://localhost:52673";
-#else
         const string HOST = "http://entrance10.mobiusdice.com.tw/demoApi2";
-#endif
+        //const string HOST = "http://localhost:52673";
         string uri_GetMails = HOST + "/GetMailsV2";
         string uri_GetReward = HOST + "/GetRewardV2";
         string uri_GetPartRewards = HOST + "/GetPartRewards";
@@ -53,13 +51,18 @@ namespace Kfc
         /// </summary>
         public void OpenMailBox(string _account,string _guid,Action<string> _messageBoxEvent, Action<int, string> _getRewardEvent)
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ViewOpen.ToString());
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_System/Image").gameObject.SetActive(true);
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_Private/Image").gameObject.SetActive(false);
             mAccount = _account;
             mGuid = _guid;
             mMessageBoxEvent = _messageBoxEvent;
             mGetRewardEvent = _getRewardEvent;
+
+            Debug.Log(mAccount + "_" + mGuid);
             gameObject.SetActive(true);
             gobj_SystemMail.SetActive(true);
-            GetAllMails();
+
         }
 
         /// <summary>
@@ -67,13 +70,17 @@ namespace Kfc
         /// </summary>
         public void CloseMailBox()
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ViewClose.ToString());
             mAccount = string.Empty;
             mGuid = string.Empty;
             mMessageBoxEvent = null;
-            
+
             gameObject.SetActive(false);
         }
-  
+        private void OnEnable()
+        {
+            GetAllMails();
+        }
 
         /// <summary>
         /// 取得所有郵件資訊 - 發送要求
@@ -82,7 +89,7 @@ namespace Kfc
         {
             Uri path = new Uri(uri_GetMails);
             HTTPRequest request = new HTTPRequest(path, HTTPMethods.Post, OnGetAllMailsFinished);
-
+            Debug.Log(mAccount + "_" + mGuid);
             Dictionary<string, object> req = new Dictionary<string, object>();
             req.Add("AccountName", mAccount);
             req.Add("guid", mGuid);
@@ -180,12 +187,15 @@ namespace Kfc
                     int money;
                     if (int.TryParse(bean.reward, out money))
                     {
-                        mail.transform.Find("UITxt_Money").GetComponent<Text>().text = money.ToString();
+                        //mail.transform.Find("Gobj_Money/UITxt_Money").GetComponent<Text>().text = money.ToString();
+                        mail.transform.Find("Gobj_Money/UITxt_Money").GetComponent<Text>().text = string.Format(CultureInfo.InvariantCulture, "{0:#,#}", money);
                     }
                     else
                     {
                         jobj = JsonConvert.DeserializeObject<JObject>(bean.reward);
-                        mail.transform.Find("UITxt_Money").GetComponent<Text>().text = jobj.GetValue("money").ToString();
+                        //mail.transform.Find("Gobj_Money/UITxt_Money").GetComponent<Text>().text = jobj.GetValue("money").ToString();
+                        mail.transform.Find("Gobj_Money/UITxt_Money").GetComponent<Text>().text = string.Format(CultureInfo.InvariantCulture, "{0:#,#}", (int)jobj.GetValue("money"));
+
                     }
 
                     mail.transform.Find("UIBtn_Lock").gameObject.SetActive(!bean.isLock);
@@ -205,6 +215,7 @@ namespace Kfc
         /// </summary>
         public void GetMailRewardOrDelete(GameObject _mail)
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ComClick1.ToString());
             currentMail = _mail;
 
             MailBean bean = currentMail.GetComponent<MailBean>();
@@ -260,12 +271,20 @@ namespace Kfc
                     currentMail = null;
                     break;
                 case 1:
+                    bean.type = 0;
+                    currentMail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
+                    if (mGetRewardEvent != null) mGetRewardEvent(1, jsonResponse.GetValue("playerMoney").ToString());
+                    break;
                 case 2:
                     bean.type = 0;
                     currentMail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
-                    if(mGetRewardEvent != null) mGetRewardEvent((int)jsonResponse.GetValue("playerMoney"), null);
+                    if(mGetRewardEvent != null) mGetRewardEvent(2, jsonResponse.GetValue("playerExp").ToString());
                     break;
-                    
+                case 3:
+                    bean.type = 0;
+                    currentMail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
+                    if (mGetRewardEvent != null) mGetRewardEvent(3, jsonResponse.GetValue("playerDp").ToString());
+                    break;
             }
             
         }
@@ -275,6 +294,7 @@ namespace Kfc
         /// </summary>
         public void SetMailLockOrNot(GameObject _mail)
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ComClick2.ToString());
             currentMail = _mail;
 
             Uri path = new Uri(uri_SetMailLockOrNot);
@@ -317,7 +337,7 @@ namespace Kfc
 
             MailBean bean = currentMail.GetComponent<MailBean>();
             bean.isLock = (bool)jsonResponse.GetValue("isLock");
-
+            
             currentMail.transform.Find("UIBtn_Unlock").gameObject.SetActive(bean.isLock);
             currentMail.transform.Find("UIBtn_Lock").gameObject.SetActive(!bean.isLock);
             
@@ -325,6 +345,7 @@ namespace Kfc
 
         public void GetPartMailsRewadAndDelete()
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ComClick1.ToString());
             List<string> mailNumbers = null;
             if (gobj_SystemMail.activeSelf)
             {
@@ -434,22 +455,24 @@ namespace Kfc
         /// 開啟系統信件
         /// </summary>
         public void OnSystemMailsBoxClick()
-        {        
+        {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ComClick1.ToString());
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_System/Image").gameObject.SetActive(true);
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_Private/Image").gameObject.SetActive(false);
             gobj_SystemMail.SetActive(true);
             gobj_PrivateMail.SetActive(false);
-            gobj_SystemMail.transform.Find("Image").gameObject.SetActive(true);
-            gobj_PrivateMail.transform.Find("Image").gameObject.SetActive(false);
         }
         /// <summary>
         /// 開啟私人信件
         /// </summary>
         public void OnPrivateMailsBoxClick()
         {
+            SlotSoundManager.bSndRef.PlaySoundEffect(ReferenceCenter.Ref.CommonMu.Container, SlotSoundManager.eAudioClip.Snd_ComClick1.ToString());
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_System/Image").gameObject.SetActive(false);
+            transform.Find("Ani_Box/Gobj_BtnBox/UIBtn_Private/Image").gameObject.SetActive(true);
             gobj_SystemMail.SetActive(false);
             gobj_PrivateMail.SetActive(true);
-            gobj_SystemMail.transform.Find("Image").gameObject.SetActive(false);
-            gobj_PrivateMail.transform.Find("Image").gameObject.SetActive(true);
-
+            
         }
     }
 
