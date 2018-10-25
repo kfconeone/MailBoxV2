@@ -177,6 +177,9 @@ namespace Kfc
                         mail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
                     else
                         mail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "領取";
+
+                    mail.transform.Find("UIImg_Icon").GetComponent<Image>().sprite = Resources.Load<Sprite>("ScriptImg/Portrait_Icon/Portrait_System");
+
                 }
                 else
                 {
@@ -204,6 +207,8 @@ namespace Kfc
                         mail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "刪除";
                     else
                         mail.transform.Find("UIBtn_Collect/Text").GetComponent<Text>().text = "領取";
+
+                    Generic.IconFetcher.SetIcon(mail.transform.Find("UIImg_Icon").GetComponent<Image>(), bean.senderIcon, bean.senderFbId);
                 }
 
                 mail.SetActive(true);
